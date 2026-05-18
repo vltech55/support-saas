@@ -59,7 +59,7 @@ async def list_conversations(
     principal: AuthPrincipal = Depends(get_principal),
     session: AsyncSession = Depends(tenant_scoped_session),
 ) -> list[dict]:
-    from sqlalchemy import desc, select
+    from sqlalchemy import desc, func, select
     from saas.models import Conversation, Message
 
     rows = (
@@ -81,11 +81,13 @@ async def list_conversations(
                 .limit(1)
             )
         ).scalar_one_or_none()
+        # COUNT(*) on the DB side — previous version fetched all IDs and counted
+        # in Python, which is O(messages) per conversation over the wire.
         count = (
             await session.execute(
-                select(Message.id).where(Message.conversation_id == c.id)
+                select(func.count(Message.id)).where(Message.conversation_id == c.id)
             )
-        ).all()
+        ).scalar_one()
         out.append(
             {
                 "id": str(c.id),
@@ -94,7 +96,7 @@ async def list_conversations(
                 "created_at": c.created_at.isoformat(),
                 "last_message_at": last.created_at.isoformat() if last else None,
                 "last_message_preview": (last.content[:120] if last else None),
-                "message_count": len(count),
+                "message_count": int(count),
             }
         )
     return out
