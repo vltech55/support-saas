@@ -8,7 +8,7 @@ from sqlalchemy import select
 from saas.auth.provider import AuthPrincipal
 from saas.core.config import settings
 from saas.core.logging import get_logger
-from saas.db import SessionLocal, set_tenant_guc
+from saas.db import SessionLocal, set_admin_guc
 from saas.models import Tenant, User
 
 log = get_logger(__name__)
@@ -49,7 +49,9 @@ class ClerkAuthProvider:
             return None
 
         async with SessionLocal() as session:
-            await set_tenant_guc(session, None)
+            # Clerk-token verification creates a local tenant+user the first time we
+            # see them. Same cross-tenant bootstrap pattern as the dev signup.
+            await set_admin_guc(session)
             tenant = (
                 await session.execute(select(Tenant).where(Tenant.slug == org_id))
             ).scalar_one_or_none()

@@ -167,6 +167,11 @@ def upgrade() -> None:
     # Defense in depth: even if application code forgets a tenant_id filter,
     # the policy denies access. The app sets `app.tenant_id` once per request
     # via set_config(..., true) so it scopes to the current transaction.
+    # RLS is fail-closed: the GUC must be explicitly set per request. An unset
+    # or empty GUC matches zero rows. The only allowed bypass is the explicit
+    # sentinel '__bootstrap__', set via set_admin_guc() in app code — used for
+    # signup (which inserts the first row of a tenant before any tenant context
+    # exists) and other system-level cross-tenant maintenance.
     for tbl in _RLS_TABLES:
         op.execute(f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY")
         op.execute(
@@ -174,10 +179,11 @@ def upgrade() -> None:
             CREATE POLICY tenant_isolation ON {tbl}
             USING (
                 tenant_id::text = current_setting('app.tenant_id', true)
-                OR current_setting('app.tenant_id', true) = ''
+                OR current_setting('app.tenant_id', true) = '__bootstrap__'
             )
             WITH CHECK (
                 tenant_id::text = current_setting('app.tenant_id', true)
+                OR current_setting('app.tenant_id', true) = '__bootstrap__'
             )
             """
         )

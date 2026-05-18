@@ -33,34 +33,48 @@ flowchart TB
     A --> CH[(conversations,\nmessages)]
 ```
 
-## Tenant isolation — two independent layers
+## Tenant isolation — two independent layers, fail-closed
 
-Every tenant-scoped table has `tenant_id NOT NULL` plus a Postgres RLS policy:
+Every tenant-scoped table has `tenant_id NOT NULL` plus a Postgres RLS
+policy that recognizes exactly **three** GUC states:
 
 ```sql
-ALTER TABLE chunks ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON chunks
 USING (
     tenant_id::text = current_setting('app.tenant_id', true)
-    OR current_setting('app.tenant_id', true) = ''
+    OR current_setting('app.tenant_id', true) = '__bootstrap__'
 )
 WITH CHECK (
     tenant_id::text = current_setting('app.tenant_id', true)
+    OR current_setting('app.tenant_id', true) = '__bootstrap__'
 );
 ```
 
+| GUC value           | Behavior                                          | Set by                           |
+| ------------------- | ------------------------------------------------- | -------------------------------- |
+| `<tenant UUID>`     | Only that tenant's rows visible/writable          | `set_tenant_guc(s, tenant_id)`   |
+| `""` (default)      | **Zero rows visible. Fail-closed.**               | `set_tenant_guc(s, None)` or unset |
+| `"__bootstrap__"`   | Bypass (cross-tenant signup/login only)           | `set_admin_guc(s)`               |
+
+A handler that *forgets* to set the GUC reads zero rows — visibly broken,
+not a silent data leak. The bypass requires the explicit sentinel; it can't
+be triggered by accident.
+
 The FastAPI dependency `tenant_scoped_session` calls
-`SELECT set_config('app.tenant_id', :t, true)` after auth. The `true` flag
-scopes the setting to the current transaction, so a pooled connection
+`set_config('app.tenant_id', :t, true)` after auth. The `true` (is_local)
+flag scopes the setting to the current transaction, so a pooled connection
 returning to the pool clears it automatically.
 
-Application code *also* filters by `tenant_id` in every query — defense in
-depth. The RLS policy is the safety net for any code path that forgets.
+Application code *also* filters by `tenant_id` in every query — RLS is the
+safety net for any code path that forgets, not the only barrier.
 
-The widget chat endpoint authenticates by a tenant-public key
-(`pk_<urlsafe>`), looks up the tenant *with the GUC cleared*, then sets
-the GUC for the rest of the request. Public-key auth never grants admin
+The widget chat endpoint authenticates by a tenant `public_key`
+(`pk_<urlsafe>`), looks up the tenant (the `tenants` table is intentionally
+*not* row-level-secured — it's the directory), then sets the GUC to that
+tenant ID for the rest of the request. Public-key auth never grants admin
 operations — only the widget chat surface.
+
+Full security model: [`docs/multi-tenancy.md`](./multi-tenancy.md).
 
 ## Auth + billing as Protocols
 

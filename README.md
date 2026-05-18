@@ -29,20 +29,29 @@ Billing: BillingProvider Protocol → mock | stripe
 
 Full mermaid diagram: [`docs/architecture.md`](./docs/architecture.md).
 
-## Tenant isolation — two independent layers
+## Tenant isolation — two independent layers, fail-closed
 
 1. **Application:** every query filters by `tenant_id`. The
    `tenant_scoped_session` dependency injects this after auth.
 2. **Postgres RLS:** every tenant-scoped table has Row Level Security
-   enabled with a policy comparing the row's `tenant_id` to
-   `current_setting('app.tenant_id')`. The dependency sets this with
-   `set_config(..., true)` so it scopes to the current transaction — safe
-   with pooled connections.
+   enabled. The policy recognizes three GUC states:
+   - **set to a tenant UUID** → only that tenant's rows visible/writable
+   - **empty (default)** → zero rows visible — *fail-closed*
+   - **`__bootstrap__` sentinel** → bypass, used only by signup/login
+
+   A handler that forgets to set the GUC reads zero rows, not all rows.
+   The bypass cannot be triggered by accident — it requires an explicit
+   `set_admin_guc()` call, audited in [`docs/multi-tenancy.md`](./docs/multi-tenancy.md).
 
 The widget public endpoint authenticates by `tenant.public_key` (a
-`pk_<urlsafe>` string), looks up the tenant with the GUC cleared, then
-sets the GUC for the rest of the request. Public keys never grant admin
-operations.
+`pk_<urlsafe>` string), looks up the tenant in the unsecured `tenants`
+directory, then sets the GUC for the rest of the request. Public keys
+never grant admin operations.
+
+Verify the model end-to-end:
+```bash
+docker compose exec backend pytest -v tests/test_tenant_isolation.py
+```
 
 ## Auth + billing behind real interfaces
 

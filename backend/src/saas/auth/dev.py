@@ -11,7 +11,7 @@ from sqlalchemy import select
 from saas.auth.provider import AuthPrincipal
 from saas.core.config import settings
 from saas.core.logging import get_logger
-from saas.db import SessionLocal, set_tenant_guc
+from saas.db import SessionLocal, set_admin_guc, set_tenant_guc
 from saas.models import Subscription, Tenant, User
 
 log = get_logger(__name__)
@@ -76,7 +76,11 @@ class DevAuthProvider:
             raise ValueError("tenant_name required")
 
         async with SessionLocal() as session:
-            await set_tenant_guc(session, None)
+            # Signup is the only legitimate cross-tenant write path: we need to
+            # detect duplicate emails across all tenants AND insert the first
+            # user+subscription row before any tenant scope exists. Engage the
+            # explicit bootstrap bypass.
+            await set_admin_guc(session)
             existing = await session.execute(select(User).where(User.email == email))
             if existing.scalar_one_or_none() is not None:
                 raise ValueError("an account with this email already exists")
@@ -105,7 +109,10 @@ class DevAuthProvider:
 
     async def login(self, email: str, password: str) -> tuple[AuthPrincipal, str]:
         async with SessionLocal() as session:
-            await set_tenant_guc(session, None)
+            # Login looks up a user by email before any tenant context exists;
+            # cross-tenant read is intentional. Bootstrap bypass is the right
+            # scope here — the password check below is the actual authorization.
+            await set_admin_guc(session)
             user = (
                 await session.execute(select(User).where(User.email == email))
             ).scalar_one_or_none()

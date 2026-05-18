@@ -22,7 +22,11 @@ log = get_logger(__name__)
 
 async def _tenant_from_public_key(public_key: str) -> Tenant:
     async with SessionLocal() as s:
-        await set_tenant_guc(s, None)  # admin scope to look up the tenant
+        # `tenants` is intentionally NOT row-level-secured (it's the directory of
+        # tenants; lookup by public_key needs cross-row visibility). Leave the
+        # GUC unset — any RLS-protected table touched accidentally here would
+        # return zero rows, which is the correct fail-closed behavior.
+        await set_tenant_guc(s, None)
         tenant = (
             await s.execute(select(Tenant).where(Tenant.public_key == public_key))
         ).scalar_one_or_none()
