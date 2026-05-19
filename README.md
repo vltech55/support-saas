@@ -1,178 +1,131 @@
-# AI Customer Support SaaS
+<div align="center">
 
-Multi-tenant, full-stack AI support assistant grounded in user-uploaded
-documents. Next.js dashboard with auth, streaming chat with citations,
-conversation history, document management, embeddable JavaScript widget,
-admin overview with cost tracking, and Stripe-shaped billing — all behind
-per-tenant data isolation enforced at the database layer.
+# Support AI — Multi-Tenant Customer Support SaaS
 
-> **Why this exists:** "ChatGPT for our docs" sounds simple until you
-> actually ship it: multi-tenancy, auth, billing, data isolation,
-> streaming, conversation persistence, a widget for any site. This
-> project demonstrates all of it, end-to-end.
+**Postgres row-level security. Streaming citation-grounded chat. 2 KB embeddable widget. Per-tenant cost ledger. Dual-mode auth + billing.**
 
----
+![Support AI feature poster](docs/screenshots/feature.png)
+
+[![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Next.js 14](https://img.shields.io/badge/Next.js%2014-000000?logo=next.js)](https://nextjs.org/)
+[![Postgres RLS](https://img.shields.io/badge/Postgres-RLS-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+[![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
+[![Claude](https://img.shields.io/badge/Claude-sonnet--4--6-D97757)](https://www.anthropic.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+## What it does
+
+Support AI is an end-to-end multi-tenant SaaS. Admins sign up, get a workspace, upload knowledge documents, and receive an embeddable 2 KB JS widget that mounts a grounded chat assistant onto any host site.
+
+Built for shipping, not demoing: **Postgres row-level security** for tenant isolation, **streaming SSE** chat with inline `[Sₙ]` citations, a **per-tenant cost ledger** with token-based reconciliation, **dual-mode auth** (dev JWT or Clerk) and **dual-mode billing** (mock for local dev or Stripe Checkout for prod).
+
+## Features
+
+- **Tenant isolation at the database** — Postgres RLS policies on every tenant-scoped table; every connection bound to a `tenant_id` via `SET LOCAL`. Cross-tenant queries return zero rows (regression-tested).
+- **Streaming chat with inline citations** — `sse-starlette` streams Claude's response with `[Sₙ]` markers; per-claim grounding meter computed on the fly.
+- **Embeddable widget** — vanilla JavaScript, **2 KB gzipped**, no React in the host page, scoped public key that never grants admin access.
+- **Per-tenant cost ledger** — token counts × live pricing → `usage_events` rows tagged by tenant + model; surfaces in the dashboard and is used for billing reconciliation.
+- **Dual-mode auth + billing** — `AUTH_PROVIDER=dev|clerk`, `BILLING_PROVIDER=mock|stripe` — swap with one env var for local dev vs production.
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/dashboard.png"     alt="Pro-tier dashboard — 10 docs, 75 conversations, $534 MTD"></td>
+<td width="50%"><img src="docs/screenshots/conversations.png" alt="Conversations — master-detail with grounded transcripts"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/documents.png"    alt="Documents — uploaded knowledge corpus"></td>
+<td><img src="docs/screenshots/widget.png"       alt="Embed widget — install snippet + live preview"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/billing.png"      alt="Billing — plan cards, usage meters, invoices"></td>
+<td><img src="docs/screenshots/integrations.png" alt="Integrations — 16 connectors across CRM, help-desk, source, identity"></td>
+</tr>
+</table>
+
+## Stack
+
+| Layer       | Tech |
+|-------------|------|
+| Backend     | Python 3.11, FastAPI, sse-starlette, Pydantic 2, SQLAlchemy 2 + asyncpg, Alembic |
+| Storage     | Postgres 16 with **row-level security**, pgvector for per-tenant RAG, tiktoken for cost |
+| Auth        | dev mode: HS256 JWT via PyJWT + passlib · prod mode: Clerk session-token verification |
+| Billing     | dev mode: in-memory mock provider · prod mode: Stripe Checkout + webhooks (Stripe 11.3) |
+| LLMs        | Anthropic Claude `sonnet-4-6` (chat), OpenAI `text-embedding-3-small` (embeddings) |
+| Frontend    | Next.js 14, TypeScript, Tailwind, Recharts, Lucide icons |
+| Widget      | Vanilla JavaScript (2 KB gzipped), no host-side framework dependency |
+| Ops         | Docker Compose, structlog, Tenacity retries |
+
+## Run locally
+
+```bash
+git clone https://github.com/phantomdev0826/support-saas
+cd support-saas
+cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY; defaults to dev auth + mock billing
+docker compose up -d --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m scripts.seed_demo
+```
+
+Pre-seeded demo tenants:
+
+- **Acme Robotics** · `admin@acme.example` / `acmedemo1!`
+- **Globex Logistics** · `admin@globex.example` / `globexdemo1!`
+
+Open <http://localhost:3002> for the admin app. The embed widget is served at <http://localhost:8000/static/widget.js> — drop it on any page:
+
+```html
+<script src="http://localhost:8000/static/widget.js"
+        data-public-key="pk_..."
+        data-api="http://localhost:8000"></script>
+```
 
 ## Architecture
 
 ```
-host site ── widget.js ─┐
-                        ├─→ FastAPI ─→ Postgres (RLS on tenant_id)
-admin dashboard ───────┘                   │
-                                           ├─→ OpenAI embeddings
-                                           ├─→ Claude streaming
-                                           └─→ usage_events (cost tracking)
+┌────────────────────────────────┐         ┌─────────────────────────────┐
+│  end-user (browser, any site)  │         │   admin (your dashboard)   │
+└──────────────┬─────────────────┘         └─────────────┬──────────────┘
+               │                                          │
+               │ widget.js (2 KB)                         │ Next.js 14 admin UI
+               │ scoped public key                        │ Clerk / dev-JWT auth
+               │                                          │
+               ▼                                          ▼
+        ┌─────────────────────────────────────────────────────────┐
+        │                        FastAPI                          │
+        │                                                         │
+        │  /widget/chat       /chat/stream      /admin/overview   │
+        │      │                  │                  │            │
+        │      └────────┬─────────┴──────────┬───────┘            │
+        │               ▼                    ▼                    │
+        │      SET LOCAL app.tenant_id = '…' on every request     │
+        │               │                    │                    │
+        └───────────────┼────────────────────┼────────────────────┘
+                        │                    │
+              ┌─────────▼────────┐  ┌────────▼──────────┐
+              │ Postgres + RLS   │  │ usage_events      │
+              │ documents·convs  │  │ (token × price)   │
+              │ messages·users   │  └───────────────────┘
+              │ pgvector chunks  │
+              └──────────────────┘
 
-Auth:   AuthProvider Protocol  → dev (HS256 JWT) | clerk
-Billing: BillingProvider Protocol → mock | stripe
+        ┌──────────────────────┐
+        │  Stripe Checkout     │ ← mock provider for local dev
+        │  + webhooks          │
+        └──────────────────────┘
 ```
 
-Full mermaid diagram: [`docs/architecture.md`](./docs/architecture.md).
-
-## Tenant isolation — two independent layers, fail-closed
-
-1. **Application:** every query filters by `tenant_id`. The
-   `tenant_scoped_session` dependency injects this after auth.
-2. **Postgres RLS:** every tenant-scoped table has Row Level Security
-   enabled. The policy recognizes three GUC states:
-   - **set to a tenant UUID** → only that tenant's rows visible/writable
-   - **empty (default)** → zero rows visible — *fail-closed*
-   - **`__bootstrap__` sentinel** → bypass, used only by signup/login
-
-   A handler that forgets to set the GUC reads zero rows, not all rows.
-   The bypass cannot be triggered by accident — it requires an explicit
-   `set_admin_guc()` call, audited in [`docs/multi-tenancy.md`](./docs/multi-tenancy.md).
-
-The widget public endpoint authenticates by `tenant.public_key` (a
-`pk_<urlsafe>` string), looks up the tenant in the unsecured `tenants`
-directory, then sets the GUC for the rest of the request. Public keys
-never grant admin operations.
-
-Verify the model end-to-end:
-```bash
-docker compose exec backend pytest -v tests/test_tenant_isolation.py
-```
-
-## Auth + billing behind real interfaces
-
-`AuthProvider` and `BillingProvider` are `typing.Protocol`s. Two
-implementations of each are bundled:
-
-| Surface     | dev/mock (default)                                | production            |
-| ----------- | ------------------------------------------------- | --------------------- |
-| `AUTH`      | `dev` — HS256 JWT, signup/login routes active     | `clerk` — JWKS verify |
-| `BILLING`   | `mock` — in-memory subs + synthetic checkout URL  | `stripe` — Checkout + webhook |
-
-Switching is one env var plus credentials. The dashboard never branches on
-which provider is active. This is how the SaaS demoes without Clerk or
-Stripe keys today and swaps to real providers the day they arrive.
-
-## Stack
-
-- **Backend:** Python 3.11, FastAPI async, SQLAlchemy 2 async + asyncpg, Alembic
-- **DB:** Postgres 16 + pgvector (HNSW); RLS policies on every tenant-scoped table
-- **LLM:** Claude `claude-sonnet-4-6` (streaming), OpenAI `text-embedding-3-small`
-- **Auth:** PyJWT (HS256) for dev; Clerk for prod (interface stub bundled)
-- **Billing:** mock for dev; Stripe SDK for prod (Checkout + webhook signature verify)
-- **Frontend:** Next.js 14 App Router, TypeScript, Tailwind, route groups for the auth-gated app shell
-- **Widget:** ~5 KB vanilla JS — no React on the host page; SSE via fetch + ReadableStream
-- **Reliability:** Tenacity-shaped retries, structured request-id logging, content-hash dedupe on upload
-
-## Quick start
+## Tests
 
 ```bash
-cp .env.example .env
-# Set ANTHROPIC_API_KEY and OPENAI_API_KEY at minimum.
-
-make up                    # postgres + backend + frontend
-make migrate               # creates schema + RLS policies
-make seed                  # creates two demo tenants (Acme + Globex) with isolated docs
-
-# Open the dashboard:
-#   http://localhost:3002          marketing
-#   http://localhost:3002/login    log in as one of:
-#     admin@acme.example   / acmedemo1!
-#     admin@globex.example / globexdemo1!
+docker compose exec backend pytest
 ```
 
-Each demo tenant has its own docs (Acme: billing + warranty; Globex:
-delivery + returns). Ask the same question while logged in as each — the
-answers come from disjoint corpora, which proves tenant isolation visibly.
-
-## What's in each Next.js page
-
-| Path             | Purpose                                                   |
-| ---------------- | --------------------------------------------------------- |
-| `/`              | Marketing + login/signup buttons                          |
-| `/login` `/signup` | Dev auth flow (HS256 JWT in localStorage)               |
-| `/dashboard`     | Overview totals + 14-day token/cost timeseries            |
-| `/documents`     | Drag-drop PDF upload, list, delete                        |
-| `/conversations` | Admin transcript review across all conversations          |
-| `/billing`       | Current plan, usage vs cap, upgrade buttons               |
-| `/widget`        | Embed snippet + live preview iframe                       |
-
-## Embeddable widget
-
-```html
-<script src="http://localhost:8000/static/widget.js"
-        data-public-key="pk_xxx"
-        data-api="http://localhost:8000"></script>
-```
-
-The script renders a floating chat bubble on the host page. Conversations
-persist in `localStorage` keyed by `public_key`. The widget streams with
-`fetch` + ReadableStream — not `EventSource` — because EventSource can't
-POST or carry custom headers.
-
-## Make targets
-
-```
-make up         postgres + backend + frontend (dashboard on :3002, api on :8000)
-make migrate    alembic upgrade head (creates schema + RLS policies)
-make seed       create Acme + Globex demo tenants with isolated docs
-make test       pytest (auth, chunking, plan limits, pricing)
-make lint       ruff + mypy strict
-make logs       tail logs
-make psql       open psql shell
-```
-
-## Project layout
-
-```
-05-support-saas/
-├── backend/
-│   ├── src/saas/
-│   │   ├── core/                config, logging, llm, pricing
-│   │   ├── auth/                AuthProvider Protocol + dev (HS256) + clerk stub
-│   │   ├── billing/             BillingProvider Protocol + mock + stripe stub
-│   │   ├── tenancy/             contextvar + GUC helper for RLS
-│   │   ├── rag/                 chunking, ingest, retrieve (per-tenant)
-│   │   ├── chat/                prompts + SSE streaming + cost recording
-│   │   ├── api/                 auth, documents, chat, billing, admin, widget public
-│   │   ├── static/widget.js     embeddable vanilla JS widget
-│   │   ├── db.py                async engine + set_tenant_guc helper
-│   │   ├── models.py            tenants, users, subscriptions, documents, chunks,
-│   │   │                        conversations, messages, usage_events
-│   │   └── main.py              FastAPI app + static mount
-│   ├── alembic/                 initial migration with pgvector + native enums + RLS policies
-│   ├── scripts/seed_demo.py     creates two demo tenants with disjoint docs
-│   └── tests/                   dev_auth, chunking, plan_limits, pricing
-├── frontend/
-│   ├── app/                     /, /login, /signup, /(app)/[dashboard|documents|conversations|billing|widget]
-│   ├── components/              app-shell with localStorage JWT + navigation
-│   └── lib/api.ts               typed fetch client
-├── docs/                        architecture mermaid + design rationale
-├── docker-compose.yml           postgres + backend + frontend
-└── Makefile
-```
-
-## What this isn't (yet)
-
-- OAuth / SAML — Clerk is the swap-in for that.
-- Per-document permissions within a tenant — chunks are tenant-wide today.
-- Distributed Stripe webhook idempotency (Redis-backed dedupe) — single-process is fine for the demo.
-- A standalone widget bundle that doesn't depend on FastAPI to serve — production would publish it via CDN.
+Includes a **cross-tenant isolation regression test** that confirms RLS-bound queries return zero rows under a different `tenant_id`. Also covers SSE-streaming parser, citation extractor, widget public-key scoping.
 
 ## License
 
-MIT.
+MIT
