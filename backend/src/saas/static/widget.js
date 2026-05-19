@@ -131,9 +131,13 @@
             return;
           }
           buf += dec.decode(r.value, { stream: true });
-          var sep;
-          while ((sep = buf.indexOf("\n\n")) !== -1) {
-            var raw = buf.slice(0, sep); buf = buf.slice(sep + 2);
+          // sse-starlette emits \r\n between fields, so events can be separated
+          // by either \n\n or \r\n\r\n.
+          var sepRe = /\r?\n\r?\n/;
+          var m;
+          while ((m = sepRe.exec(buf))) {
+            var raw = buf.slice(0, m.index);
+            buf = buf.slice(m.index + m[0].length);
             handle(raw);
           }
           return pump();

@@ -32,9 +32,15 @@ _RLS_TABLES = (
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.execute("CREATE TYPE plan AS ENUM ('free','pro','enterprise')")
-    op.execute("CREATE TYPE subscription_status AS ENUM ('active','canceled','past_due','trialing')")
-    op.execute("CREATE TYPE conversation_channel AS ENUM ('dashboard','widget')")
+    # SQLAlchemy auto-creates the ENUMs when emitting the first column that references them.
+    # Listing values inline is required — without them SA generates CREATE TYPE ... AS ENUM ()
+    # which Postgres rejects (and the second column references the same name, so we declare
+    # the Enum objects once and reuse via .copy()).
+    plan_enum = sa.Enum("free", "pro", "enterprise", name="plan")
+    subscription_status_enum = sa.Enum(
+        "active", "canceled", "past_due", "trialing", name="subscription_status",
+    )
+    conversation_channel_enum = sa.Enum("dashboard", "widget", name="conversation_channel")
 
     op.create_table(
         "tenants",
@@ -42,7 +48,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("slug", sa.String(64), nullable=False, unique=True),
         sa.Column("public_key", sa.String(64), nullable=False, unique=True),
-        sa.Column("plan", sa.Enum(name="plan", create_type=False), nullable=False, server_default="free"),
+        sa.Column("plan", plan_enum, nullable=False, server_default="free"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
@@ -62,10 +68,18 @@ def upgrade() -> None:
         "subscriptions",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True),
-        sa.Column("plan", sa.Enum(name="plan", create_type=False), nullable=False, server_default="free"),
+        sa.Column(
+            "plan",
+            sa.Enum("free", "pro", "enterprise", name="plan", create_type=False),
+            nullable=False,
+            server_default="free",
+        ),
         sa.Column(
             "status",
-            sa.Enum(name="subscription_status", create_type=False),
+            sa.Enum(
+                "active", "canceled", "past_due", "trialing",
+                name="subscription_status", create_type=False,
+            ),
             nullable=False,
             server_default="active",
         ),
@@ -115,7 +129,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
         sa.Column(
             "channel",
-            sa.Enum(name="conversation_channel", create_type=False),
+            sa.Enum("dashboard", "widget", name="conversation_channel", create_type=False),
             nullable=False,
             server_default="dashboard",
         ),

@@ -2,8 +2,19 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Support AI SaaS",
-  description: "Multi-tenant AI customer support — grounded in your docs.",
+  title: {
+    default: "Support AI · grounded customer assistant",
+    template: "%s · Support AI",
+  },
+  description: "Multi-tenant AI customer support, grounded in your docs. RAG with citation-grounded answers, an embeddable widget, and per-tenant cost reporting.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
+  openGraph: {
+    title: "Support AI · grounded customer assistant",
+    description: "Multi-tenant AI customer support, grounded in your docs.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
