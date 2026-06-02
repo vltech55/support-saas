@@ -62,7 +62,7 @@ Built for shipping, not demoing: **Postgres row-level security** for tenant isol
 ## Run locally
 
 ```bash
-git clone https://github.com/phantomdev0826/support-saas
+git clone https://github.com/vltech55/support-saas
 cd support-saas
 cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY; defaults to dev auth + mock billing
 docker compose up -d --build
