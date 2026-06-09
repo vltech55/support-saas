@@ -1,8 +1,8 @@
 <div align="center">
 
-# Support AI — Multi-Tenant Customer Support SaaS
+# Support AI
 
-**Postgres row-level security. Streaming citation-grounded chat. 2 KB embeddable widget. Per-tenant cost ledger. Dual-mode auth + billing.**
+**Multi-tenant customer-support SaaS with Postgres row-level security, streaming citation-grounded chat, a 2 KB embeddable widget, a per-tenant cost ledger, and dual-mode auth + billing.**
 
 ![Support AI feature poster](docs/screenshots/feature.png)
 
@@ -15,17 +15,31 @@
 
 </div>
 
-## What it does
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Tech Stack](#tech-stack)
+- [Installation](#installation)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Author](#author)
+- [License](#license)
+
+## Overview
 
 Support AI is an end-to-end multi-tenant SaaS. Admins sign up, get a workspace, upload knowledge documents, and receive an embeddable 2 KB JS widget that mounts a grounded chat assistant onto any host site.
 
-Built for shipping, not demoing: **Postgres row-level security** for tenant isolation, **streaming SSE** chat with inline `[Sₙ]` citations, a **per-tenant cost ledger** with token-based reconciliation, **dual-mode auth** (dev JWT or Clerk) and **dual-mode billing** (mock for local dev or Stripe Checkout for prod).
+Built for shipping, not demoing: Postgres row-level security for tenant isolation, streaming SSE chat with inline `[Sₙ]` citations, a per-tenant cost ledger with token-based reconciliation, dual-mode auth (dev JWT or Clerk), and dual-mode billing (mock for local dev, Stripe Checkout for prod).
 
 ## Features
 
 - **Tenant isolation at the database** — Postgres RLS policies on every tenant-scoped table; every connection bound to a `tenant_id` via `SET LOCAL`. Cross-tenant queries return zero rows (regression-tested).
 - **Streaming chat with inline citations** — `sse-starlette` streams Claude's response with `[Sₙ]` markers; per-claim grounding meter computed on the fly.
-- **Embeddable widget** — vanilla JavaScript, **2 KB gzipped**, no React in the host page, scoped public key that never grants admin access.
+- **Embeddable widget** — vanilla JavaScript, 2 KB gzipped, no React in the host page, scoped public key that never grants admin access.
 - **Per-tenant cost ledger** — token counts × live pricing → `usage_events` rows tagged by tenant + model; surfaces in the dashboard and is used for billing reconciliation.
 - **Dual-mode auth + billing** — `AUTH_PROVIDER=dev|clerk`, `BILLING_PROVIDER=mock|stripe` — swap with one env var for local dev vs production.
 
@@ -46,23 +60,23 @@ Built for shipping, not demoing: **Postgres row-level security** for tenant isol
 </tr>
 </table>
 
-## Stack
+## Tech Stack
 
-| Layer       | Tech |
-|-------------|------|
-| Backend     | Python 3.11, FastAPI, sse-starlette, Pydantic 2, SQLAlchemy 2 + asyncpg, Alembic |
-| Storage     | Postgres 16 with **row-level security**, pgvector for per-tenant RAG, tiktoken for cost |
-| Auth        | dev mode: HS256 JWT via PyJWT + passlib · prod mode: Clerk session-token verification |
-| Billing     | dev mode: in-memory mock provider · prod mode: Stripe Checkout + webhooks (Stripe 11.3) |
-| LLMs        | Anthropic Claude `sonnet-4-6` (chat), OpenAI `text-embedding-3-small` (embeddings) |
-| Frontend    | Next.js 14, TypeScript, Tailwind, Recharts, Lucide icons |
-| Widget      | Vanilla JavaScript (2 KB gzipped), no host-side framework dependency |
-| Ops         | Docker Compose, structlog, Tenacity retries |
+| Layer      | Technology |
+|------------|------------|
+| Backend    | Python 3.11, FastAPI, sse-starlette, Pydantic 2, SQLAlchemy 2 + asyncpg, Alembic |
+| Storage    | Postgres 16 with row-level security, pgvector for per-tenant RAG, tiktoken for cost |
+| Auth       | dev mode: HS256 JWT via PyJWT + passlib · prod mode: Clerk session-token verification |
+| Billing    | dev mode: in-memory mock provider · prod mode: Stripe Checkout + webhooks (Stripe 11.3) |
+| LLMs       | Anthropic Claude `sonnet-4-6` (chat), OpenAI `text-embedding-3-small` (embeddings) |
+| Frontend   | Next.js 14, TypeScript, Tailwind, Recharts, Lucide icons |
+| Widget     | Vanilla JavaScript (2 KB gzipped), no host-side framework dependency |
+| Operations | Docker Compose, structlog, Tenacity retries |
 
-## Run locally
+## Installation
 
 ```bash
-git clone https://github.com/vltech55/support-saas
+git clone https://github.com/vltech55/support-saas.git
 cd support-saas
 cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY; defaults to dev auth + mock billing
 docker compose up -d --build
@@ -118,14 +132,20 @@ Open <http://localhost:3002> for the admin app. The embed widget is served at <h
         └──────────────────────┘
 ```
 
-## Tests
+## Testing
 
 ```bash
 docker compose exec backend pytest
 ```
 
-Includes a **cross-tenant isolation regression test** that confirms RLS-bound queries return zero rows under a different `tenant_id`. Also covers SSE-streaming parser, citation extractor, widget public-key scoping.
+Includes a cross-tenant isolation regression test that confirms RLS-bound queries return zero rows under a different `tenant_id`. Also covers SSE-streaming parser, citation extractor, widget public-key scoping.
+
+## Author
+
+**Vlad L.** — independent senior engineer specializing in production-grade LLM systems (RAG, agents, gateways, multi-tenant SaaS).
+
+[![GitHub](https://img.shields.io/badge/GitHub-vltech55-181717?logo=github)](https://github.com/vltech55)
 
 ## License
 
-MIT
+[MIT](LICENSE) © Vlad L.
